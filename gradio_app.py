@@ -8,6 +8,9 @@ import re
 import os
 from datetime import datetime
 import gradio as gr
+from io import BytesIO
+import base64
+import time
 
 # Define the function to generate audio based on a prompt
 def generate_audio(prompt, steps, cfg_scale, sigma_min, sigma_max, generation_time, seed, sampler_type):
@@ -50,6 +53,9 @@ def generate_audio(prompt, steps, cfg_scale, sigma_min, sigma_max, generation_ti
 
     # Convert to MP3 format using pydub
     audio = AudioSegment.from_wav("temp_output.wav")
+    audio_bytes = BytesIO()
+    audio.export(audio_bytes, format="mp3")
+    audio_bytes.seek(0)
 
     # Create Output folder and dated subfolder if they do not exist
     output_folder = "Output"
@@ -72,9 +78,9 @@ def generate_audio(prompt, steps, cfg_scale, sigma_min, sigma_max, generation_ti
     # Export the audio to MP3 format
     audio.export(full_path, format="mp3")
 
-    return full_path
+    return full_path, base64.b64encode(audio_bytes.read()).decode("utf-8")
 
-def audio_generator(prompt, sampler_type, steps, cfg_scale, sigma_min, sigma_max, generation_time, seed):
+def audio_generator(prompt, sampler_type, steps, cfg_scale, sigma_min, sigma_max, generation_time, seed, wait_time):
     try:
         print("Generating audio with parameters:")
         print("Prompt:", prompt)
@@ -86,10 +92,22 @@ def audio_generator(prompt, sampler_type, steps, cfg_scale, sigma_min, sigma_max
         print("Generation Time:", generation_time)
         print("Seed:", seed)
         
-        filename = generate_audio(prompt, steps, cfg_scale, sigma_min, sigma_max, generation_time, seed, sampler_type)
-        return gr.Audio(filename), f"Generated: {filename}"
+        filename, audio_base64 = generate_audio(prompt, steps, cfg_scale, sigma_min, sigma_max, generation_time, seed, sampler_type)
+
+        # Calculate wait time in seconds
+        try:
+            hh, mm, ss = map(int, wait_time.split(':'))
+            wait_seconds = hh * 3600 + mm * 60 + ss
+        except ValueError:
+            wait_seconds = 0
+
+        print(f"Waiting for {wait_seconds} seconds before playing the audio.")
+        time.sleep(wait_seconds)
+
+        audio_player = f'<audio src="data:audio/mpeg;base64,{audio_base64}" controls autoplay></audio>'
+        return audio_player, f"Generated: {filename}"
     except Exception as e:
-        return str(e)
+        return str(e), ""
 
 # Create Gradio interface
 prompt_textbox = gr.Textbox(lines=5, label="Prompt")
@@ -106,26 +124,24 @@ sampler_dropdown = gr.Dropdown(
     ],
     value="dpmpp-3m-sde"
 )
-steps_slider = gr.Slider(minimum=0, maximum=200, label="Steps", step=1)
-steps_slider.value = 100  # Set the default value here
-cfg_scale_slider = gr.Slider(minimum=0, maximum=15, label="CFG Scale", step=0.1)
-cfg_scale_slider.value = 7  # Set the default value here
+steps_slider = gr.Slider(minimum=0, maximum=200, label="Steps", step=1, value=100)
+cfg_scale_slider = gr.Slider(minimum=0, maximum=15, label="CFG Scale", step=0.1, value=7)
 sigma_min_slider = gr.Slider(minimum=0, maximum=50, label="Sigma Min", step=0.1, value=0.3)
 sigma_max_slider = gr.Slider(minimum=0, maximum=1000, label="Sigma Max", step=1, value=500)
-generation_time_slider = gr.Slider(minimum=0, maximum=47, label="Generation Time (seconds)", step=1)
-generation_time_slider.value = 47  # Set the default value here
-seed_slider = gr.Slider(minimum=-1, maximum=999999, label="Seed", step=1)
-seed_slider.value = 77212  # Set the default value here
+generation_time_slider = gr.Slider(minimum=0, maximum=47, label="Generation Time (seconds)", step=1, value=47)
+seed_slider = gr.Slider(minimum=-1, maximum=999999, label="Seed", step=1, value=77212)
+wait_time_textbox = gr.Textbox(label="Wait Time (HH:MM:SS)", value="00:05:00")
 
+output_html = gr.HTML(label="Output")
 output_textbox = gr.Textbox(label="Output")
 
-title = "💀🔊 StableAudioWebUI 💀🔊"
+title = "💀🔊 StableAudioAlarmWebUI 💀🔊"
 description = "[Github Repository](https://github.com/Saganaki22/StableAudioWebUI)"
 
 gr.Interface(
     audio_generator,
-    [prompt_textbox, sampler_dropdown, steps_slider, cfg_scale_slider, sigma_min_slider, sigma_max_slider, generation_time_slider, seed_slider],
-    [gr.Audio(), output_textbox],
+    [prompt_textbox, sampler_dropdown, steps_slider, cfg_scale_slider, sigma_min_slider, sigma_max_slider, generation_time_slider, seed_slider, wait_time_textbox],
+    [output_html, output_textbox],
     title=title,
     description=description
 ).launch()
